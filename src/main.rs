@@ -17,7 +17,7 @@ use tui::{
     Frame, Terminal,
 };
 
-//use glob::glob;
+use glob::glob;
 use v4l::control::Value as ControlValue;
 use v4l::prelude::*;
 
@@ -29,21 +29,12 @@ struct Camera {
 }
 
 impl Camera {
-    fn new() -> Camera {
-        //let mut paths = Vec::new();
-        //for entry in glob("/dev/video*").expect("Failed to read glob pattern") {
-        //    match entry {
-        //        Ok(path) => {
-        //            paths.push(path.display().to_string());
-        //        }
-        //        Err(e) => println!("{:?}", e),
-        //    }
-        //}
+    fn new(name: &str) -> Camera {
         let mut ctls = Vec::new();
-        if let Ok(dev) = Device::with_path("/dev/video0") {
+        if let Ok(dev) = Device::with_path(name) {
             if let Ok(mut controls) = dev.query_controls() {
                 //devices.push(&paths);
-                controls.retain_mut(|c| c.typ == v4l::control::Type::Integer);
+                controls.retain_mut(|c| c.typ != v4l::control::Type::CtrlClass);
                 for i in controls.iter_mut() {
                     if let Ok(c) = dev.control(i.id) {
                         i.default = match c.value {
@@ -58,7 +49,7 @@ impl Camera {
         //println!("{:?}", ctls);
 
         let c = Camera {
-            name: String::from("/dev/video0"),
+            name: String::from(name),
             progress: ctls,
             selected: 0,
         };
@@ -74,20 +65,32 @@ struct App {
 
 impl App {
     fn new() -> App {
-        App {
-            cams: vec![Camera::new(), Camera::new(), Camera::new(), Camera::new()],
-            selected: 0,
+        let mut cams = Vec::new();
+        for entry in glob("/dev/video*").expect("Failed to read glob pattern") {
+            match entry {
+                Ok(path) => {
+                    let c = Camera::new(&path.display().to_string());
+                    cams.push(c);
+                }
+                Err(e) => println!("{:?}", e),
+            }
         }
+
+        App { cams, selected: 0 }
     }
 
     fn update(&mut self) {
-        for i in self.cams[0].progress.iter_mut() {
-            if i.default + (i.step as i64) > i.maximum {
-                i.default = i.maximum;
-            } else if i.default + (i.step as i64) < i.minimum {
-                i.default = i.minimum
-            } else {
-                i.default += i.step as i64
+        for cam in self.cams.iter_mut() {
+            if let Ok(dev) = Device::with_path(&cam.name) {
+                for mut prog in &mut cam.progress.iter_mut() {
+                    if let Ok(ctl) = dev.control(prog.id) {
+                        prog.default = match ctl.value {
+                            ControlValue::Integer(n) => n,
+                            _ => prog.default,
+                        }
+                    } else {
+                    }
+                }
             }
         }
     }
@@ -104,7 +107,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         if let Ok(c) = dev.control(control.id) {
             println!("!!!!{:?}", c);
         }
-        //println!("{}", control);
+        println!("{}", control);
     }
     // setup terminimumal
     enable_raw_mode()?;
@@ -162,60 +165,65 @@ fn run_app<B: Backend>(
                     }
                 }
 
-                if let KeyCode::Char('j') = key.code {
+                if let KeyCode::Char('j') | KeyCode::Down = key.code {
                     let mut cam = &mut app.cams[app.selected];
                     if cam.selected < cam.progress.len() - 1 {
                         cam.selected += 1;
                     }
                 }
-                if let KeyCode::Char('k') = key.code {
+                if let KeyCode::Char('k') | KeyCode::Up = key.code {
                     let mut cam = &mut app.cams[app.selected];
                     if cam.selected > 0 {
                         cam.selected -= 1;
                     }
                 }
 
-                if let KeyCode::Char('l') = key.code {
-                    let c = &mut app.cams[app.selected];
-                    let mut i = &mut c.progress[c.selected];
-                    if i.default + (i.step as i64) > i.maximum {
-                        i.default = i.maximum;
-                    } else {
-                        i.default += i.step as i64
-                    }
-                    if let Ok(dev) = Device::with_path(&c.name) {
-                        let xx = v4l::control::Control {
+                if let KeyCode::Char('l') | KeyCode::Right = key.code {
+                    let cam = &mut app.cams[app.selected];
+                    let mut i = &mut cam.progress[cam.selected];
+                    let val = {
+                        if i.default + (i.step as i64) > i.maximum {
+                            i.maximum
+                        } else {
+                            i.default + i.step as i64
+                        }
+                    };
+                    if let Ok(dev) = Device::with_path(&cam.name) {
+                        let ctl = v4l::control::Control {
                             id: i.id,
-                            value: v4l::control::Value::Integer(i.default),
+                            value: v4l::control::Value::Integer(val),
                         };
-                        if let Ok(_) = dev.set_control(xx) {} else {
-                            i.default = -99
+                        if let Ok(_) = dev.set_control(ctl) {
+                            i.default = val;
+                        } else {
                         }
                     }
                 }
-                if let KeyCode::Char('h') = key.code {
-                    let c = &mut app.cams[app.selected];
-                    let mut i = &mut c.progress[c.selected];
-                    if i.default - (i.step as i64) > i.minimum {
-                        i.default -= i.step as i64;
-                    } else {
-                        i.default = i.minimum;
-                    }
-                    if let Ok(dev) = Device::with_path(&c.name) {
-                        let xx = v4l::control::Control {
+                if let KeyCode::Char('h') | KeyCode::Left  = key.code {
+                    let cam = &mut app.cams[app.selected];
+                    let mut i = &mut cam.progress[cam.selected];
+                    let val = {
+                        if i.default - (i.step as i64) > i.minimum {
+                            i.default - i.step as i64
+                        } else {
+                            i.minimum
+                        }
+                    };
+                    if let Ok(dev) = Device::with_path(&cam.name) {
+                        let ctl = v4l::control::Control {
                             id: i.id,
-                            value: v4l::control::Value::Integer(i.default),
+                            value: v4l::control::Value::Integer(val),
                         };
-                        if let Ok(_) = dev.set_control(xx) {} else {
-                            i.default = -99
+                        if let Ok(_) = dev.set_control(ctl) {
+                            i.default = val;
+                        } else {
                         }
                     }
-
                 }
             }
         }
         if last_tick.elapsed() >= tick_rate {
-            //app.update();
+            app.update();
             last_tick = Instant::now();
         }
     }
@@ -227,10 +235,6 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
     f.render_widget(block, size);
     let mut constraints = vec![Constraint::Length(3)];
     constraints.extend(vec![
-        //Constraint::Ratio(
-        //    1,
-        //    app.cams[app.selected].progress.len() as u32
-        //);
         Constraint::Max(3);
         app.cams[app.selected].progress.len() + 1 //WTF?
     ]);
@@ -263,20 +267,26 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
     f.render_widget(tabs, chunks[0]);
 
     for (i, p) in app.cams[app.selected].progress.iter().enumerate() {
-        //if p.typ != v4l::control::Type::Integer {
-        //    continue;
-        //}
-        let label = format!("{}", p.default);
         let color = if app.cams[app.selected].selected == i {
-            [Color::Green, Color::Black]
+            [Color::White, Color::DarkGray]
         } else {
-            [Color::DarkGray, Color::Gray]
+            [Color::DarkGray, Color::Black]
         };
 
+        let ratio = (p.default - p.minimum) as f64 / (p.maximum - p.minimum) as f64;
+        //let label = format!("{},{},{} {}", p.default, p.maximum, p.minimum, ratio);
+        let label = format!("{}", p.default);
+        //if p.typ == v4l::control::Type::Menu {
+        //    if let Some(items) = &p.items {
+        //        match (items.1::MenuItem::Name) {
+        //            Namelabel = s;
+        //        }
+        //    }
+        //}
         let gauge = Gauge::default()
             .block(Block::default().title(&*p.name).borders(Borders::ALL))
             .gauge_style(Style::default().fg(color[0]).bg(color[1]))
-            .ratio((p.default / (p.maximum - p.minimum)) as f64)
+            .ratio(ratio)
             .label(label);
         f.render_widget(gauge, chunks[i + 1]);
     }

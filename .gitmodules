@@ -1,0 +1,4 @@
+[submodule "libv4l-rs"]
+	path = libv4l-rs
+	url = git@github.com:berysaidi/libv4l-rs.git
+	branch = fix/controls-i32

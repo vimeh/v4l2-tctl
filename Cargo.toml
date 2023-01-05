@@ -1,12 +1,16 @@
 [package]
-name = "v4l2-nctl"
+name = "v4l2-tctl"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.release]
+opt-level = 3
+
+[profile.dev]
+overflow-checks = true
 
 [dependencies]
-v4l = "0.13.1"
+v4l = {path = "./libv4l-rs", version = "0.13.1", features = ["v4l2"]}
 tui = "0.19.0"
 crossterm =  "0.25"
 glob = "0.3.0"

@@ -33,7 +33,6 @@ impl Camera {
         let mut ctls = Vec::new();
         if let Ok(dev) = Device::with_path(name) {
             if let Ok(mut controls) = dev.query_controls() {
-                //devices.push(&paths);
                 controls.retain_mut(|c| c.typ != v4l::control::Type::CtrlClass);
                 for i in controls.iter_mut() {
                     if let Ok(c) = dev.control(i.id) {
@@ -46,7 +45,7 @@ impl Camera {
                 ctls = controls;
             }
         }
-        //println!("{:?}", ctls);
+        println!("{:?}", ctls);
 
         let c = Camera {
             name: String::from(name),
@@ -97,17 +96,28 @@ impl App {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let path = "/dev/video0";
-    println!("Using device: {}\n", path);
+    // TODO: remove this later.
+    #[cfg(debug_assertions)]
+    {
+        let path = "/dev/video0";
+        println!("Using device: {}\n", path);
 
-    let dev = Device::with_path(path)?;
-    let controls = dev.query_controls()?;
-
-    for control in controls {
-        if let Ok(c) = dev.control(control.id) {
-            println!("!!!!{:?}", c);
+        let dev = Device::with_path(path)?;
+        let controls = dev.query_controls()?;
+        //println!("!!!!{:?}", controls);
+        for control in controls {
+            if let Ok(c) = dev.control(control.id) {
+                println!("!!!!{:?}", c);
+            }
+            if control.typ == v4l::control::Type::Menu {
+                if let Some(items) = &control.items {
+                    for (k, v) in items.iter() {
+                        println!("{} {}", k, v);
+                    }
+                }
+            }
+            //println!("{}", control);
         }
-        println!("{}", control);
     }
     // setup terminimumal
     enable_raw_mode()?;
@@ -199,7 +209,7 @@ fn run_app<B: Backend>(
                         }
                     }
                 }
-                if let KeyCode::Char('h') | KeyCode::Left  = key.code {
+                if let KeyCode::Char('h') | KeyCode::Left = key.code {
                     let cam = &mut app.cams[app.selected];
                     let mut i = &mut cam.progress[cam.selected];
                     let val = {
@@ -275,14 +285,28 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
 
         let ratio = (p.default - p.minimum) as f64 / (p.maximum - p.minimum) as f64;
         //let label = format!("{},{},{} {}", p.default, p.maximum, p.minimum, ratio);
-        let label = format!("{}", p.default);
-        //if p.typ == v4l::control::Type::Menu {
-        //    if let Some(items) = &p.items {
-        //        match (items.1::MenuItem::Name) {
-        //            Namelabel = s;
-        //        }
-        //    }
-        //}
+        let mut label = format!("{}", p.default);
+
+        match p.typ {
+            v4l::control::Type::Menu => {
+                if let Some(items) = &p.items {
+                    for (k, v) in items.iter() {
+                        if p.default == *k as i64 {
+                            label = v.to_string();
+                        }
+                    }
+                }
+            }
+            v4l::control::Type::Boolean => {
+                label = if p.default == 1 {
+                    "True".to_string()
+                } else {
+                    "False".to_string()
+                };
+            }
+            _ => (),
+        }
+
         let gauge = Gauge::default()
             .block(Block::default().title(&*p.name).borders(Borders::ALL))
             .gauge_style(Style::default().fg(color[0]).bg(color[1]))
